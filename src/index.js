@@ -1,141 +1,105 @@
 import './css/styles.css';
-import Notiflix from 'notiflix';
-import axios from "axios";
-import SimpleLightbox from "simplelightbox";
-import "simplelightbox/dist/simple-lightbox.min.css";
+import { fetchImages } from './services/api';
+import { renderGalleryMarkup } from './renderMarkup';
+import { Notify } from 'notiflix/build/notiflix-notify-aio';
+import SimpleLightbox from 'simplelightbox';
+import 'simplelightbox/dist/simple-lightbox.min.css';
 
+let value = null;
 
 const refs = {
-input: document.querySelector('input'),
-form: document.querySelector('.search-form'),
-buttonLoad: document.querySelector('.load-more'),
-gallery: document.querySelector('.gallery'),
-alert: document.querySelector('.alert')
-}
-
-const BASE_URL = "https://pixabay.com/api/";
-
-refs.form.addEventListener('submit', (onFormSubmit));
-refs.buttonLoad.addEventListener('click', (onLoadMoreBtn))
-
-let isAlertVisible = false;
-let nameSearch = refs.input.value;
-let lightbox;
-let currentPage = 1;
-let perPage = 40;
-const totalPages = 500 / perPage;
-console.log(totalPages);
-
-
-refs.buttonLoad.classList.add('invisible');
-
-
-async function fetchImages() {
-    try {
-        const response = await axios.get(`${BASE_URL}?key=29414581-04780822c1d2ceb9af08e1854&image_type=photo&orientation=horizontal&safesearch=true&q=${nameSearch}&page=${currentPage}&per_page=${perPage}`);
-         const arrayImages = await response.data.hits;
-
-        if(arrayImages.length === 0) {
-            Notiflix.Notify.warning(
-            "Sorry, there are no images matching your search query. Please try again.")
-        } else if(arrayImages.length !== 0) {
-            refs.buttonLoad.classList.remove('invisible')
-        }
-        return {arrayImages,
-            totalHits: response.data.totalHits,}       
-        
-    } catch(error) {
-        console.log(error)
-    }
-}
-
-    
-function onFormSubmit(e) {    
-e.preventDefault()
-
-  refs.gallery.innerHTML = '';
-  nameSearch = refs.input.value;
-  nameSearch;
-  refs.buttonLoad.classList.add('invisible')
-
-  fetchImages() 
-    .then(images => {
-      insertMarkup(images);
-      currentPage += 1;
-    }).catch(error => (console.log(error)))
-
- 
-    lightbox = new SimpleLightbox('.gallery a', {
-        captionsData: 'alt',
-        captionPosition: 'bottom',
-        captionDelay: 250,
-    });
-}
-
-
-function onLoadMoreBtn(){
-    if (currentPage > totalPages) {
-        refs.buttonLoad.classList.add('invisible');
-        return toggleAlertPopup()
-    }
-
-    nameSearch = refs.input.value;
-
-    fetchImages() 
-    .then(images => {
-      insertMarkup(images);   
-      currentPage += 1;})
-    .catch(error => (console.log(error)))
-}
-
-
-const createMarkup = img => `
-  <li class="photo-card">
-         <a href="${img.largeImageURL}" class="gallery_link">
-          <img class="gallery__image" src="${img.webformatURL}" alt="${img.tags}" width="370px" loading="lazy" />
-          </a>
-        <div class="info">
-              <p class="info-item">
-              <b>Likes<br>${img.likes}</b>
-              </p>
-              <p class="info-item">
-              <b>Views<br>${img.views}</b>
-              </p>
-              <p class="info-item">
-              <b>Comments<br>${img.comments}</b>
-              </p>
-              <p class="info-item">
-              <b>Downloads<br>${img.downloads}</b>
-              </p>
-        </div>
-    </li>
-`; 
-
-
-function generateMarkup(  { arrayImages, totalHits }) {
-    if (currentPage === 1) {
-        Notiflix.Notify.success(`Hoooray! We found ${totalHits} images!`);
-    }
-    return arrayImages.reduce((acc, img) => acc + createMarkup(img), "") 
+  searchForm: document.querySelector('.search-form'),
+  galleryDiv: document.querySelector('.gallery'),
+  guard: document.querySelector('.js-guard'),
 };
 
+let page = 1;
 
-function insertMarkup(arrayImages) {
-    const result = generateMarkup(arrayImages);   
-    refs.gallery.insertAdjacentHTML('beforeend', result);
-
- lightbox.refresh();
+const optionsForObserver = {
+  root: null,
+  rootMargin: '300px',
+  treshold: 1,
 };
+const observer = new IntersectionObserver(updateList, optionsForObserver);
 
+refs.searchForm.addEventListener('submit', onSearchFormInput);
 
-function toggleAlertPopup() {
-    if (isAlertVisible) {
+function updateList(entries) {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      page += 1;
+      if (!value) {
+        return;
+      }
+      fetchImages(value, page)
+        .then(response => {
+          const markup = renderGalleryMarkup(response);
+          refs.galleryDiv.insertAdjacentHTML('beforeend', markup);
+          lightbox.refresh();
+          smoothScroll();
+          if (response.data.totalHits < page * 40) {
+            Notify.failure(
+              "We're sorry, but you've reached the end of search results."
+            );
+            observer.unobserve(refs.guard);
+            return;
+          }
+        })
+        .catch(console.log);
+    }
+  });
+}
+
+function onSearchFormInput(event) {
+  event.preventDefault();
+  value = event.target.elements.searchQuery.value;
+  page = 1;
+  updateMarkup(value);
+}
+
+async function updateMarkup(value) {
+  if (!value) {
+    refs.galleryDiv.innerHTML = '';
+    Notify.failure(
+      'Sorry, there are no images matching your search query. Please try again.'
+    );
+    return;
+  }
+  try {
+    const response = await fetchImages(value, page);
+    if (response.data.hits.length === 0) {
+      refs.galleryDiv.innerHTML = '';
+      Notify.failure(
+        'Sorry, there are no images matching your search query. Please try again.'
+      );
       return;
     }
-    isAlertVisible = true;
-    refs.alert.classList.add("is-visible");
-    setTimeout(() => {
-      refs.alert.classList.remove("is-visible");
-      isAlertVisible = false;
-    }, 3000);
-};
+    Notify.info(`Hooray! We found ${response.data.totalHits} images.`);
+    refs.galleryDiv.innerHTML = '';
+    const markup = renderGalleryMarkup(response);
+    refs.galleryDiv.insertAdjacentHTML('beforeend', markup);
+    lightbox.refresh();
+    observer.observe(refs.guard);
+  } catch (error) {
+    console.log(error.message);
+  }
+}
+
+const lightbox = new SimpleLightbox('.gallery a', {
+  captionsData: 'alt',
+  captionDelay: 250,
+});
+
+function smoothScroll() {
+  const { height: cardHeight } = document
+    .querySelector('.gallery')
+    .firstElementChild.getBoundingClientRect();
+
+  window.scrollBy({
+    top: cardHeight * 2,
+    behavior: 'smooth',
+  });
+}
+    
+
+

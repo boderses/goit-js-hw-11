@@ -90,6 +90,10 @@ img {
     text-align: center;
 }
 
+.load-more.hidden {
+    display: none;
+}
+
 .search, .load-more {
     display: inline-block;
     padding: 10px 15px;
@@ -117,9 +121,7 @@ img {
     color: rgba(33, 150, 243, 1);
 }
 
-.invisible {
-    display: none;
-}
+
 
 
 .alert {
